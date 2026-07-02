@@ -176,12 +176,32 @@ func (s *GOBStore) loadUnlocked() error {
 		// wedge grepai in a permanent error loop: the index is a rebuildable
 		// cache. Quarantine the bad file and start from an empty index so the
 		// next scan re-creates it.
+		// Close before renaming: Windows cannot rename a file that is open.
 		_ = file.Close()
 		corruptPath := s.indexPath + ".corrupt"
-		if renameErr := fileutil.ReplaceFileAtomically(s.indexPath, corruptPath); renameErr != nil {
-			return fmt.Errorf("failed to decode index: %w", err)
+		// Plain os.Rename, NOT ReplaceFileAtomically: its remove-then-rename
+		// fallback would delete a .corrupt file freshly quarantined by a
+		// concurrent process (Load holds only a shared lock).
+		renameErr := os.Rename(s.indexPath, corruptPath)
+		if renameErr != nil && !os.IsNotExist(renameErr) {
+			// os.Rename does not overwrite an existing file on Windows; drop a
+			// stale quarantine from a previous recovery and retry once.
+			_ = os.Remove(corruptPath)
+			renameErr = os.Rename(s.indexPath, corruptPath)
 		}
-		log.Printf("Warning: index file %s is corrupted (%v); moved it to %s and starting with an empty index — it will be rebuilt on the next scan", s.indexPath, err, corruptPath)
+		switch {
+		case renameErr == nil:
+			log.Printf("Warning: index file %s is corrupted (%v); moved it to %s and starting with an empty index — it will be rebuilt on the next scan", s.indexPath, err, corruptPath)
+		case os.IsNotExist(renameErr):
+			// A concurrent process hit the same corruption and already
+			// quarantined the file; adopt its recovery instead of resurfacing
+			// the decode error.
+			log.Printf("Warning: index file %s is corrupted (%v); already quarantined by a concurrent process — starting with an empty index", s.indexPath, err)
+		default:
+			// Self-heal failed (e.g. read-only directory): keep the fatal
+			// behavior but surface the failed quarantine so it is diagnosable.
+			return fmt.Errorf("failed to decode index: %w (quarantine to %s failed: %v)", err, corruptPath, renameErr)
+		}
 		s.chunks = make(map[string]Chunk)
 		s.documents = make(map[string]Document)
 		return nil
