@@ -444,3 +444,117 @@ func TestGOBStore_FileLocking(t *testing.T) {
 		t.Errorf("Expected chunk ID c1, got %s", chunks[0].ID)
 	}
 }
+
+func TestGOBStore_LoadGarbageIndexRecovers(t *testing.T) {
+	tmpDir := t.TempDir()
+	indexPath := filepath.Join(tmpDir, "index.gob")
+
+	if err := os.WriteFile(indexPath, []byte("not a gob file"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	store := NewGOBStore(indexPath)
+	if err := store.Load(context.Background()); err != nil {
+		t.Fatalf("Load should recover from a corrupted index, got: %v", err)
+	}
+
+	numDocs, numChunks := store.Stats()
+	if numDocs != 0 || numChunks != 0 {
+		t.Fatalf("Expected empty store after recovery, got %d docs / %d chunks", numDocs, numChunks)
+	}
+
+	if _, err := os.Stat(indexPath); !os.IsNotExist(err) {
+		t.Fatal("Expected corrupted index file to be moved aside")
+	}
+	if _, err := os.Stat(indexPath + ".corrupt"); err != nil {
+		t.Fatalf("Expected quarantined .corrupt file to exist: %v", err)
+	}
+}
+
+func TestGOBStore_LoadTruncatedIndexRecovers(t *testing.T) {
+	tmpDir := t.TempDir()
+	indexPath := filepath.Join(tmpDir, "index.gob")
+	ctx := context.Background()
+
+	s1 := NewGOBStore(indexPath)
+	if err := s1.SaveChunks(ctx, []Chunk{
+		{ID: "c1", FilePath: "a.go", Content: "hello", Vector: []float32{1, 2, 3}},
+	}); err != nil {
+		t.Fatalf("SaveChunks failed: %v", err)
+	}
+	if err := s1.Persist(ctx); err != nil {
+		t.Fatalf("Persist failed: %v", err)
+	}
+
+	// Simulate an unclean shutdown mid-write: truncate the index to half its size.
+	info, err := os.Stat(indexPath)
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+	if err := os.Truncate(indexPath, info.Size()/2); err != nil {
+		t.Fatalf("Truncate failed: %v", err)
+	}
+
+	s2 := NewGOBStore(indexPath)
+	if err := s2.Load(ctx); err != nil {
+		t.Fatalf("Load should recover from a truncated index, got: %v", err)
+	}
+
+	numDocs, numChunks := s2.Stats()
+	if numDocs != 0 || numChunks != 0 {
+		t.Fatalf("Expected empty store after recovery, got %d docs / %d chunks", numDocs, numChunks)
+	}
+
+	// A recovered (empty) store must be able to persist and reload cleanly.
+	if err := s2.Persist(ctx); err != nil {
+		t.Fatalf("Persist after recovery failed: %v", err)
+	}
+	s3 := NewGOBStore(indexPath)
+	if err := s3.Load(ctx); err != nil {
+		t.Fatalf("Load after recovery persist failed: %v", err)
+	}
+}
+
+func TestGOBStore_PersistIsAtomicAndLeavesNoTempFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	indexPath := filepath.Join(tmpDir, "index.gob")
+	ctx := context.Background()
+
+	store := NewGOBStore(indexPath)
+	if err := store.SaveChunks(ctx, []Chunk{
+		{ID: "c1", FilePath: "a.go", Content: "v1", Vector: []float32{1}},
+	}); err != nil {
+		t.Fatalf("SaveChunks failed: %v", err)
+	}
+	if err := store.Persist(ctx); err != nil {
+		t.Fatalf("First persist failed: %v", err)
+	}
+
+	// Overwrite an existing index (the rename-over path).
+	if err := store.SaveChunks(ctx, []Chunk{
+		{ID: "c2", FilePath: "b.go", Content: "v2", Vector: []float32{2}},
+	}); err != nil {
+		t.Fatalf("SaveChunks failed: %v", err)
+	}
+	if err := store.Persist(ctx); err != nil {
+		t.Fatalf("Second persist failed: %v", err)
+	}
+
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadDir failed: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name() != "index.gob" && e.Name() != "index.gob.lock" {
+			t.Errorf("Unexpected leftover file after persist: %s", e.Name())
+		}
+	}
+
+	loaded := NewGOBStore(indexPath)
+	if err := loaded.Load(ctx); err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if _, numChunks := loaded.Stats(); numChunks != 2 {
+		t.Fatalf("Expected 2 chunks after reload, got %d", numChunks)
+	}
+}

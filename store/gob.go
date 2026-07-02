@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/gob"
 	"fmt"
+	"log"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -170,7 +172,19 @@ func (s *GOBStore) loadUnlocked() error {
 	var data gobData
 	decoder := gob.NewDecoder(file)
 	if err := decoder.Decode(&data); err != nil {
-		return fmt.Errorf("failed to decode index: %w", err)
+		// A truncated/corrupted index (e.g. after an unclean shutdown) must not
+		// wedge grepai in a permanent error loop: the index is a rebuildable
+		// cache. Quarantine the bad file and start from an empty index so the
+		// next scan re-creates it.
+		_ = file.Close()
+		corruptPath := s.indexPath + ".corrupt"
+		if renameErr := fileutil.ReplaceFileAtomically(s.indexPath, corruptPath); renameErr != nil {
+			return fmt.Errorf("failed to decode index: %w", err)
+		}
+		log.Printf("Warning: index file %s is corrupted (%v); moved it to %s and starting with an empty index — it will be rebuilt on the next scan", s.indexPath, err, corruptPath)
+		s.chunks = make(map[string]Chunk)
+		s.documents = make(map[string]Document)
+		return nil
 	}
 
 	s.chunks = data.Chunks
@@ -214,22 +228,42 @@ func (s *GOBStore) Persist(ctx context.Context) error {
 }
 
 // persistUnlocked performs the actual persist without any locking.
+// It writes to a temp file and atomically replaces the index so that an
+// unclean shutdown mid-write can never leave a truncated index behind.
 func (s *GOBStore) persistUnlocked() error {
-	file, err := os.Create(s.indexPath)
-	if err != nil {
-		return fmt.Errorf("failed to create index file: %w", err)
-	}
-	defer file.Close()
-
 	data := gobData{
 		Chunks:    s.chunks,
 		Documents: s.documents,
 	}
 
-	encoder := gob.NewEncoder(file)
-	if err := encoder.Encode(data); err != nil {
+	tmpFile, err := os.CreateTemp(filepath.Dir(s.indexPath), filepath.Base(s.indexPath)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("failed to create index temp file: %w", err)
+	}
+
+	tmpPath := tmpFile.Name()
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if err := gob.NewEncoder(tmpFile).Encode(data); err != nil {
+		_ = tmpFile.Close()
 		return fmt.Errorf("failed to encode index: %w", err)
 	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("failed to sync index temp file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close index temp file: %w", err)
+	}
+	if err := fileutil.ReplaceFileAtomically(tmpPath, s.indexPath); err != nil {
+		return fmt.Errorf("failed to replace index file: %w", err)
+	}
+	cleanupTemp = false
 
 	return nil
 }
