@@ -286,7 +286,8 @@ type WatchConfig struct {
 	RPGMaxDirtyFilesPerBatch    int       `yaml:"rpg_max_dirty_files_per_batch,omitempty"`
 	// DiscoverWorktrees controls automatic discovery (and watching) of linked
 	// git worktrees. A pointer is used so that configs without the key keep
-	// the historical default (enabled).
+	// the historical default (enabled). Only the main worktree's config is
+	// consulted — the key is ignored in linked-worktree config copies.
 	DiscoverWorktrees *bool `yaml:"discover_worktrees,omitempty"`
 }
 
