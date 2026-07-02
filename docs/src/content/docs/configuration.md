@@ -58,6 +58,9 @@ chunking:
 watch:
   # Debounce delay in milliseconds
   debounce_ms: 500
+  # Auto-discover and watch linked git worktrees (default: true).
+  # Only read from the main worktree's config.
+  discover_worktrees: true
 
 # Call graph tracing configuration
 trace:

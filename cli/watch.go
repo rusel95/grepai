@@ -861,6 +861,7 @@ func runInitialScan(ctx context.Context, idx *indexer.Indexer, scanner *indexer.
 
 // discoverWorktreesForWatch discovers linked worktrees and auto-initializes them.
 // Only discovers from the main worktree; returns nil for linked worktrees.
+// Discovery can be disabled with watch.discover_worktrees: false in config.
 func discoverWorktreesForWatch(projectRoot string) []string {
 	projectRootCanonical := canonicalPath(projectRoot)
 
@@ -871,6 +872,24 @@ func discoverWorktreesForWatch(projectRoot string) []string {
 
 	// Only the main worktree discovers linked worktrees
 	if gitInfo.IsWorktree {
+		return nil
+	}
+
+	// Respect the opt-out. Re-checked on every discovery pass, so toggling the
+	// option takes effect on the supervisor's next reconcile without a restart.
+	// Only the main worktree's config is consulted: discovery never runs from
+	// linked worktrees, so the key is ignored in their config copies.
+	cfg, err := config.Load(projectRoot)
+	if err != nil {
+		// Fail closed: a torn/invalid config (e.g. saved mid-edit between two
+		// reconcile passes) must not re-enable discovery behind the user's
+		// back — discovery auto-initializes worktrees (creates .grepai/,
+		// edits .gitignore), which is not free to undo. Skipping a pass is:
+		// the next successful load resumes discovery.
+		log.Printf("Warning: skipping worktree discovery: failed to load config for %s: %v", projectRoot, err)
+		return nil
+	}
+	if !cfg.Watch.WorktreeDiscoveryEnabled() {
 		return nil
 	}
 
