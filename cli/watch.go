@@ -861,6 +861,7 @@ func runInitialScan(ctx context.Context, idx *indexer.Indexer, scanner *indexer.
 
 // discoverWorktreesForWatch discovers linked worktrees and auto-initializes them.
 // Only discovers from the main worktree; returns nil for linked worktrees.
+// Discovery can be disabled with watch.discover_worktrees: false in config.
 func discoverWorktreesForWatch(projectRoot string) []string {
 	projectRootCanonical := canonicalPath(projectRoot)
 
@@ -871,6 +872,12 @@ func discoverWorktreesForWatch(projectRoot string) []string {
 
 	// Only the main worktree discovers linked worktrees
 	if gitInfo.IsWorktree {
+		return nil
+	}
+
+	// Respect the opt-out. Re-checked on every discovery pass, so toggling the
+	// option takes effect on the supervisor's next reconcile without a restart.
+	if cfg, err := config.Load(projectRoot); err == nil && !cfg.Watch.WorktreeDiscoveryEnabled() {
 		return nil
 	}
 

@@ -144,3 +144,26 @@ func TestAutoInitFromMainWorktree(t *testing.T) {
 		}
 	})
 }
+
+func TestWatchConfig_WorktreeDiscoveryEnabled(t *testing.T) {
+	boolPtr := func(v bool) *bool { return &v }
+
+	cases := []struct {
+		name string
+		val  *bool
+		want bool
+	}{
+		{name: "unset defaults to enabled", val: nil, want: true},
+		{name: "explicit true", val: boolPtr(true), want: true},
+		{name: "explicit false disables", val: boolPtr(false), want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := WatchConfig{DiscoverWorktrees: tc.val}
+			if got := cfg.WorktreeDiscoveryEnabled(); got != tc.want {
+				t.Fatalf("WorktreeDiscoveryEnabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

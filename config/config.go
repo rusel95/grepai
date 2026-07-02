@@ -284,6 +284,16 @@ type WatchConfig struct {
 	RPGDerivedDebounceMs        int       `yaml:"rpg_derived_debounce_ms,omitempty"`
 	RPGFullReconcileIntervalSec int       `yaml:"rpg_full_reconcile_interval_sec,omitempty"`
 	RPGMaxDirtyFilesPerBatch    int       `yaml:"rpg_max_dirty_files_per_batch,omitempty"`
+	// DiscoverWorktrees controls automatic discovery (and watching) of linked
+	// git worktrees. A pointer is used so that configs without the key keep
+	// the historical default (enabled).
+	DiscoverWorktrees *bool `yaml:"discover_worktrees,omitempty"`
+}
+
+// WorktreeDiscoveryEnabled reports whether linked git worktrees should be
+// auto-discovered and watched. Defaults to true when the option is not set.
+func (w WatchConfig) WorktreeDiscoveryEnabled() bool {
+	return w.DiscoverWorktrees == nil || *w.DiscoverWorktrees
 }
 
 type TraceConfig struct {
