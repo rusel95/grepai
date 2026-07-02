@@ -22,7 +22,13 @@ Manual (Claude Code example):
 
 ```bash
 git clone --depth 1 https://github.com/yoanbernabeu/grepai /tmp/grepai-skill
-cp -r /tmp/grepai-skill/skills/grepai-doctor ~/.claude/skills/
+cp -r /tmp/grepai-skill/.claude/skills/grepai-doctor ~/.claude/skills/
+```
+
+Working **inside the grepai repo itself**? Claude Code picks the skill up automatically from `.claude/skills/`. For other agents (Cursor, Codex, ...), install it into their directories from the repo root:
+
+```bash
+npx skills add . --skill grepai-doctor -a '*'
 ```
 
 ## What it does
@@ -36,7 +42,7 @@ cp -r /tmp/grepai-skill/skills/grepai-doctor ~/.claude/skills/
 | "grep or grepai here?" | `bench` | times `git grep` vs `grepai search` on *your* repo → `.grepai/bench.md` |
 
 ```bash
-bash skills/grepai-doctor/doctor.sh [ensure|force|init|install|bench]
+bash .claude/skills/grepai-doctor/doctor.sh [ensure|force|init|install|bench]
 ```
 
 `ensure` exits instantly when everything is healthy, and exits silently in repos without `.grepai/` — safe to wire into a session-start hook.
