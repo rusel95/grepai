@@ -57,6 +57,12 @@ Requires an embedding provider — [Ollama](https://ollama.ai) (default), [LM St
 ollama pull nomic-embed-text
 ```
 
+**AI agent skill (optional):**
+```bash
+npx skills add yoanbernabeu/grepai --skill grepai-doctor
+```
+Teaches your coding agent (Claude Code, Cursor, Codex, …) to install, heal, and benchmark grepai on its own instead of silently falling back to plain grep — see [grepai-doctor](.claude/skills/grepai-doctor/README.md).
+
 ## Quick Start
 
 ```bash
