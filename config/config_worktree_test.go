@@ -167,3 +167,35 @@ func TestWatchConfig_WorktreeDiscoveryEnabled(t *testing.T) {
 		})
 	}
 }
+
+func TestWatchConfig_DiscoverWorktreesSurvivesLoadSaveRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".grepai"), 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	yaml := "embedder:\n  provider: ollama\nstore:\n  backend: gob\nwatch:\n  debounce_ms: 500\n  discover_worktrees: false\n"
+	if err := os.WriteFile(filepath.Join(root, ".grepai", "config.yaml"), []byte(yaml), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	// Explicit false must pass through YAML unmarshal...
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Watch.WorktreeDiscoveryEnabled() {
+		t.Fatal("expected discovery disabled after Load")
+	}
+
+	// ...and survive the watcher's own config rewrite (Save + Load).
+	if err := cfg.Save(root); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+	cfg2, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load after Save failed: %v", err)
+	}
+	if cfg2.Watch.WorktreeDiscoveryEnabled() {
+		t.Fatal("expected discover_worktrees: false to survive Save/Load round-trip")
+	}
+}
