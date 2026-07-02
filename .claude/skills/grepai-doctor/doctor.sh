@@ -37,6 +37,14 @@ install_all() {
 # time a command, print bash `real` time (e.g. 0m0.042s)
 t() { { time "$@" >/dev/null 2>&1; } 2>&1 | awk '/^real/{print $2}'; }
 
+# intent sentence -> OR-pattern of stemmed content words, i.e. the grep a
+# skilled agent would actually type (never benchmark literal sentences).
+kw() {
+    echo "$1" | tr '[:upper:]' '[:lower:]' | tr -cs '[:lower:]' '\n' \
+      | grep -vwE 'the|and|are|is|how|where|what|when|why|to|of|in|on|for|a|an|be|by|with|that|this|it|its' \
+      | sed -E 's/(es|ed|ing|s)$//; s/(.)\1$/\1/' | awk 'length>=3' | sort -u | paste -sd'|' -
+}
+
 bench() {
     [ -d .grepai ] || { echo "no .grepai here — run: doctor.sh init"; exit 1; }
     grepai search "warmup" --json >/dev/null 2>&1   # load embedding model before timing
@@ -61,15 +69,22 @@ bench() {
             echo "| \`$SYM\` | exact symbol | $G_N hits, $G_T | $A_N hits, $A_T |"
         fi
         for Q in "where errors are handled and logged" "how configuration is loaded and validated" "the main entry point and startup flow"; do
-            # exclude this script's own committed copy — it contains these literal phrases
-            G_T=$(t git grep -In -e "$Q" -- ':(exclude)*doctor.sh'); G_N=$(git grep -In -e "$Q" -- ':(exclude)*doctor.sh' 2>/dev/null | wc -l | tr -d ' ')
+            PAT=$(kw "$Q")
+            # keyword-decomposed grep = what an agent would really type; exclude
+            # this script's own committed copy (it contains these phrases)
+            G_T=$(t git grep -inE "$PAT" -- ':(exclude)*doctor.sh'); G_N=$(git grep -inE "$PAT" -- ':(exclude)*doctor.sh' 2>/dev/null | wc -l | tr -d ' ')
             A_T=$(t grepai search "$Q" --json --compact); A_N=$(grepai search "$Q" --json --compact 2>/dev/null | grep -c '"file_path"')
-            echo "| \"$Q\" | semantic | $G_N hits, $G_T | $A_N hits, $A_T |"
+            echo "| \"$Q\" -> \`$PAT\` | intent vs keyword grep | $G_N lines, $G_T | $A_N chunks, $A_T |"
         done
         echo
-        echo "Verdict: exact identifiers/strings -> git grep (faster, exhaustive)."
-        echo "Intent phrased in natural language -> grepai (literal grep returns ~0)."
-        echo "grep also wins when the index is cold/broken; run doctor.sh to heal it."
+        echo "Verdict: exact identifiers/strings -> git grep (fastest, exhaustive)."
+        echo "Intent questions -> grepai: ~10 scored chunks in ONE call; keyword grep"
+        echo "returns the raw line volume above to triage and usually needs several"
+        echo "refinement rounds. (Literal full-sentence grep finds ~0 — that is a"
+        echo "strawman, never benchmark or argue with it.)"
+        echo "If grepai's top hits are docs/reports instead of code: scope with"
+        echo "--path <srcdir>, or add a .grepaiignore for generated content."
+        echo "grep also wins while the index is cold/broken; run doctor.sh to heal."
         grepai stats 2>/dev/null | sed 's/^/> /'
     } | tee "$OUT"
     echo; echo "saved -> $OUT"

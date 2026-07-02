@@ -46,18 +46,21 @@ Then one test search. A full reindex takes minutes (scales with repo size and em
 
 ## bench → agent memory
 
-`bench` produces real per-repo numbers: exact-symbol queries (grep territory — fast, exhaustive, noisy) vs natural-language queries (grep finds ~0; grepai returns top-10 focused chunks). Persist the verdict so future sessions pick the right tool without re-measuring:
+`bench` produces real per-repo numbers, and it compares **fairly**: the exact-symbol row is grep's home turf, and the intent rows pit grepai against *keyword-decomposed* grep (stemmed OR-pattern — what a skilled agent would actually type), NOT against a literal full-sentence grep. Literal-sentence grep trivially finds 0 and proves nothing; if you see that comparison anywhere, treat it as a strawman. Token-savings figures from `grepai stats` are also measured against naive grep dumps — quote them as such, not as "grep can't do this".
 
-- exact identifiers, imports, string literals → `git grep` / Grep tool
-- intent questions ("where is X handled") → `grepai search`
+The honest trade-off to persist in memory:
+
+- exact identifiers, imports, string literals → `git grep` / Grep tool (fastest, exhaustive)
+- intent questions ("where is X handled") → `grepai search`: ~10 scored chunks in one call, vs keyword grep's raw line volume + triage + refinement rounds
 - before modifying a function → `grepai trace callers|callees <sym> --json`
 - grepai errors → this skill, not a silent grep fallback
 
-Include the repo name and measured numbers in the memory entry.
+Include the repo name and the measured numbers (line volumes, timings) in the memory entry.
 
 ## Gotchas
 
 - `.gitignore` is respected natively. For **extra** ignores use a committable `.grepaiignore` in the repo root (gitignore syntax, grepai ≥ 0.35). Ignores in `.grepai/config.yaml` work but are machine-local — they don't travel with the repo.
+- If search results are polluted by docs/reports/generated markdown instead of code: scope the query with `grepai search "<q>" --path <srcdir>`, or add those files to `.grepaiignore`. This is the most common cause of "grepai found nothing useful" in repos with lots of prose.
 - The watcher auto-indexes **all linked git worktrees** (issue #211). If `watch.discover_worktrees` is available (PR #270), set it to `false` in the main worktree's config; otherwise prune stale worktrees (`git worktree remove` + `git worktree prune`) to cut RAM and index time.
 - Corruption signature: `index.gob` under ~1 KB = truncated by a crash mid-write (issue #178). Versions with PR #269 self-heal on load (quarantine + atomic writes); for older versions the script sweeps truncated indexes. The sweep is harmless either way.
 - `force` wipes only the vector index (`index.gob`); the symbol index (`symbols.gob`) is left alone on purpose — the watcher detects a corrupt one and rebuilds it in place.
