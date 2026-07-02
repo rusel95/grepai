@@ -2,13 +2,16 @@
 # grepai-doctor: install, heal, and benchmark grepai in the current repo. Idempotent. No daemons, no root.
 # usage: doctor.sh [ensure|force|init|install|bench]
 #   ensure (default) — if watcher is down: sweep truncated indexes, start background watcher
-#   force            — stop watcher, wipe ALL indexes, full reindex (for "unexpected EOF" corruption)
+#   force            — stop watcher, wipe vector indexes, full reindex (for "unexpected EOF" corruption)
 #   init             — end-to-end for a new repo: install stack, grepai init --yes, start watcher
 #   install          — install grepai (brew or install.sh) + ollama + embedding model, nothing else
 #   bench            — measure grep vs grepai on THIS repo's index, write .grepai/bench.md
 set -u
 MODE="${1:-ensure}"
 have() { command -v "$1" >/dev/null 2>&1; }
+# `grepai watch --status` prints "Status: not running" when down — anchor the
+# match, a bare "running" grep would match both states.
+watcher_running() { grepai watch --status 2>/dev/null | grep -q '^Status: running'; }
 
 install_all() {
     if ! have grepai; then
@@ -17,14 +20,18 @@ install_all() {
         have grepai || { echo "grepai install failed — see https://github.com/yoanbernabeu/grepai"; exit 1; }
     fi
     if ! have ollama; then
-        if have brew; then brew install ollama
-        else echo "install ollama manually: https://ollama.com/download"; exit 1; fi
+        if have brew; then brew install ollama; fi
+        have ollama || { echo "install ollama manually: https://ollama.com/download"; exit 1; }
     fi
     if ! curl -s --max-time 2 http://localhost:11434/api/tags >/dev/null; then
         nohup ollama serve >/dev/null 2>&1 &
         for _ in 1 2 3 4 5; do sleep 1; curl -s --max-time 2 http://localhost:11434/api/tags >/dev/null && break; done
+        curl -s --max-time 2 http://localhost:11434/api/tags >/dev/null \
+            || { echo "ollama API not reachable at localhost:11434 — start it manually (ollama serve)"; exit 1; }
     fi
-    ollama list 2>/dev/null | grep -q nomic-embed-text || ollama pull nomic-embed-text
+    if ! ollama list 2>/dev/null | grep -q nomic-embed-text; then
+        ollama pull nomic-embed-text || { echo "failed to pull nomic-embed-text"; exit 1; }
+    fi
 }
 
 # time a command, print bash `real` time (e.g. 0m0.042s)
@@ -36,9 +43,11 @@ bench() {
     HITS=$(grepai search "warmup" --json --compact 2>/dev/null | grep -c '"file_path"')
     [ "$HITS" -gt 0 ] || { echo "index empty or still building — check: grepai status --no-ui"; exit 1; }
 
-    # exact-identifier probe: most common defined symbol in the repo (grep's home turf)
+    # exact-identifier probe: most common symbol defined in CODE files (grep's
+    # home turf). Restricted to code extensions so prose in docs can't win.
     # no \b: git grep -E is POSIX ERE, word boundaries unsupported on macOS
-    SYM=$(git grep -hoE '(func|function|def|fn|class|struct|interface) [A-Za-z_][A-Za-z0-9_]{3,}' 2>/dev/null \
+    SYM=$(git grep -hoE '(func|function|def|fn|class|struct|interface) [A-Za-z_][A-Za-z0-9_]{3,}' \
+              -- '*.go' '*.py' '*.js' '*.ts' '*.tsx' '*.jsx' '*.swift' '*.rs' '*.java' '*.kt' '*.c' '*.cc' '*.cpp' '*.h' '*.rb' '*.php' '*.cs' 2>/dev/null \
           | awk '{print $2}' | sort | uniq -c | sort -rn | awk 'NR==1{print $2}')
     OUT=.grepai/bench.md
     {
@@ -69,17 +78,27 @@ bench() {
 case "$MODE" in
     install) install_all; echo "install: OK ($(grepai version 2>/dev/null))"; exit 0 ;;
     bench)   bench; exit 0 ;;
-    init)    install_all; [ -d .grepai ] || grepai init --yes ;;
-    *)       have grepai || { echo "grepai not installed — run: doctor.sh install"; exit 1; } ;;
+    init)    install_all
+             if [ ! -d .grepai ]; then
+                 grepai init --yes || { echo "grepai init failed"; exit 1; }
+                 [ -d .grepai ] || { echo "grepai init did not create .grepai"; exit 1; }
+             fi ;;
+    ensure|force) have grepai || { echo "grepai not installed — run: doctor.sh install"; exit 1; } ;;
+    *)       echo "usage: doctor.sh [ensure|force|init|install|bench]"; exit 2 ;;
 esac
-[ -d .grepai ] || exit 0   # repo hasn't opted into grepai — do nothing
+[ -d .grepai ] || exit 0   # repo hasn't opted into grepai — do nothing (hook safety)
 
 if [ "$MODE" = "force" ]; then
     grepai watch --stop 2>/dev/null
+    # never wipe under a live watcher — it could rewrite the index mid-delete
+    watcher_running && { echo "watcher still running after --stop — aborting wipe"; exit 1; }
     SIZE_FILTER=""          # wipe everything → full reindex
 else
-    grepai watch --status 2>/dev/null | grep -qi running && exit 0   # healthy, done
-    SIZE_FILTER="-size -1k" # ponytail: <1KB index.gob = truncated by a crash
+    watcher_running && exit 0   # healthy, done
+    # ponytail: <1KB index.gob = truncated by a crash. Byte units: GNU find
+    # rounds -1k UP to whole units (matches only 0-byte files); -1024c is
+    # exact on both BSD and GNU.
+    SIZE_FILTER="-size -1024c"
 fi
 
 # sweep main repo + all linked worktrees (watcher indexes them all)
@@ -95,6 +114,9 @@ done
 # initial scan outlives its 30s readiness window — the daemon is fine; trust --status.
 grepai watch --background 2>/dev/null
 sleep 2
-grepai watch --status 2>/dev/null | grep -qi running \
-    && echo "watcher: running (index builds in background — grepai status --no-ui)" \
-    || { echo "watcher failed — log: ~/Library/Logs/grepai/"; exit 1; }
+if watcher_running; then
+    echo "watcher: running (index builds in background — grepai status --no-ui)"
+else
+    echo "watcher failed to start — check: grepai watch --status (prints the log path)"
+    exit 1
+fi
