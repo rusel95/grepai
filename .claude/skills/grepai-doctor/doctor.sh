@@ -73,14 +73,21 @@ bench() {
             # keyword-decomposed grep = what an agent would really type; exclude
             # this script's own committed copy (it contains these phrases)
             G_T=$(t git grep -inE "$PAT" -- ':(exclude)*doctor.sh'); G_N=$(git grep -inE "$PAT" -- ':(exclude)*doctor.sh' 2>/dev/null | wc -l | tr -d ' ')
+            G_F=$(git grep -ilE "$PAT" -- ':(exclude)*doctor.sh' 2>/dev/null | wc -l | tr -d ' ')
             A_T=$(t grepai search "$Q" --json --compact); A_N=$(grepai search "$Q" --json --compact 2>/dev/null | grep -c '"file_path"')
-            echo "| \"$Q\" -> \`$PAT\` | intent vs keyword grep | $G_N lines, $G_T | $A_N chunks, $A_T |"
+            echo "| \"$Q\" -> \`$PAT\` | intent vs keyword grep | $G_N lines in $G_F files, $G_T | $A_N chunks, $A_T |"
         done
         echo
-        echo "Verdict: exact identifiers/strings -> git grep (fastest, exhaustive)."
-        echo "Intent questions -> grepai: ~10 scored chunks in ONE call; keyword grep"
-        echo "returns the raw line volume above to triage and usually needs several"
-        echo "refinement rounds. (Literal full-sentence grep finds ~0 — that is a"
+        echo "Verdict: exact identifiers/strings/syntax anchors (@main, func main) ->"
+        echo "git grep (fastest, exhaustive; many intent questions are anchor queries"
+        echo "in disguise). Intent questions -> the RECALL-SAFE COMBO: grepai gives"
+        echo "~10 ranked chunks in one call, AND 'git grep -ilE <pattern>' gives the"
+        echo "exhaustive candidate FILE LIST (names only — grep's full recall at ~1%"
+        echo "of the multi-thousand-line dumps above). Read ranked hits first, then"
+        echo "relevant-looking checklist files grepai did not rank. grepai's top-10"
+        echo "is a ranking, NOT exhaustive — it can miss ground-truth files; never"
+        echo "treat it as complete coverage, and never dump full grep content for an"
+        echo "intent query. (Literal full-sentence grep finds ~0 — that is a"
         echo "strawman, never benchmark or argue with it.)"
         echo "If grepai's top hits are docs/reports instead of code: scope with"
         echo "--path <srcdir>, or add a .grepaiignore for generated content."
