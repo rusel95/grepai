@@ -48,10 +48,10 @@ Then one test search. A full reindex takes minutes (scales with repo size and em
 
 `bench` produces real per-repo numbers, and it compares **fairly**: the exact-symbol row is grep's home turf, and the intent rows pit grepai against *keyword-decomposed* grep (stemmed OR-pattern — what a skilled agent would actually type), NOT against a literal full-sentence grep. Literal-sentence grep trivially finds 0 and proves nothing; if you see that comparison anywhere, treat it as a strawman. Token-savings figures from `grepai stats` are also measured against naive grep dumps — quote them as such, not as "grep can't do this".
 
-The honest trade-off to persist in memory:
+One more honesty caveat: the bench measures **volume** (chunks vs lines), not **relevance**. grepai's top-10 is a ranking, not an exhaustive result set — measured on real repos it can miss ground-truth files that keyword grep finds trivially. The rule that saves tokens *without losing recall*:
 
-- exact identifiers, imports, string literals → `git grep` / Grep tool (fastest, exhaustive)
-- intent questions ("where is X handled") → `grepai search`: ~10 scored chunks in one call, vs keyword grep's raw line volume + triage + refinement rounds
+- exact identifiers, imports, string literals, syntax anchors (`@main`, `func main(`) → `git grep` / Grep tool (fastest, exhaustive; many "intent" questions are anchor queries in disguise)
+- intent questions ("where is X handled") → the **recall-safe combo**: `grepai search --json --compact` for ~10 ranked chunks **plus** `git grep -ilE 'kw1|kw2'` for the exhaustive candidate file list (names only — grep's full recall at ~1% of a content dump). Read ranked hits first, then relevant-looking checklist files grepai didn't rank. Never dump full grep content for an intent query, and never treat grepai top-10 as complete coverage.
 - before modifying a function → `grepai trace callers|callees <sym> --json`
 - grepai errors → this skill, not a silent grep fallback
 
