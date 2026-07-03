@@ -1,6 +1,6 @@
 # grepai-doctor
 
-Agent skill: the single entry point for the whole [grepai](https://github.com/yoanbernabeu/grepai) stack — **install → init → self-heal → benchmark** — so your AI coding agent fixes a broken semantic search instead of silently falling back to plain grep.
+Agent skill: the single entry point for the whole [grepai](https://github.com/yoanbernabeu/grepai) stack — **install → init → self-heal → benchmark** — so your AI coding agent keeps grepai healthy and chooses between grep and grepai deliberately, on measured per-repo numbers instead of vibes.
 
 One idempotent bash script (`doctor.sh`), no daemons, no launchd, no root. Works with any agent that reads `SKILL.md` (Claude Code, Cursor, Codex, Windsurf, …).
 
@@ -15,6 +15,8 @@ npx skills add yoanbernabeu/grepai --skill grepai-doctor
 # or user-level (all your projects)
 npx skills add yoanbernabeu/grepai --skill grepai-doctor -g
 ```
+
+> Until this skill is merged upstream ([PR #271](https://github.com/yoanbernabeu/grepai/pull/271)), the commands above won't find it — install from the fork instead: `npx skills add rusel95/grepai --skill grepai-doctor`.
 
 Useful flags: `-a '*'` installs for every detected agent, `--copy` copies instead of symlinking, `-l` lists available skills without installing.
 
@@ -39,7 +41,7 @@ npx skills add . --skill grepai-doctor -a '*'
 | fresh repo, no `.grepai/` | `init` | full stack install → `grepai init --yes` → background watcher |
 | `failed to load index` / `unexpected EOF` | `force` | stop watcher → wipe vector index → full reindex |
 | empty results / watcher down | `ensure` (default) | sweep truncated indexes (repo + linked worktrees), restart watcher |
-| "grep or grepai here?" | `bench` | times `git grep` vs `grepai search` on *your* repo → `.grepai/bench.md` |
+| "grep or grepai here?" | `bench` | measures `git grep` vs `grepai search` on *your* repo (hit/line/file volumes + timings) → `.grepai/bench.md` |
 
 ```bash
 bash .claude/skills/grepai-doctor/doctor.sh [ensure|force|init|install|bench]
@@ -49,7 +51,7 @@ bash .claude/skills/grepai-doctor/doctor.sh [ensure|force|init|install|bench]
 
 ## Why
 
-When grepai breaks, agents don't report it — they quietly switch to plain grep, and semantic search (with its ~96% token savings per [`grepai stats`](https://github.com/yoanbernabeu/grepai)) disappears unnoticed. The skill makes healing a one-liner and teaches the agent when each tool actually wins: exact identifiers → grep; intent questions ("where is X handled") → grepai — with `bench` producing the per-repo numbers to prove it.
+When grepai breaks, agents don't report it — they quietly switch tools, and the repo's search setup stays broken for weeks with nobody choosing that on purpose. The skill makes healing a one-liner and puts the grep-vs-grepai choice on measured ground: grep is exhaustive (and a file-names-only `git grep -ilE` is nearly free); `grepai search` returns ~10 ranked chunks per intent query — a ranking, not complete coverage, so it can miss files keyword grep finds. `bench` produces those volumes and timings for *your* repo. One honesty note: token-savings figures reported by `grepai stats` are computed against naive full-content grep dumps — treat them as an upper bound, not a measured saving.
 
 ## Verify
 

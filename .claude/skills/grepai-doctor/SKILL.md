@@ -1,19 +1,19 @@
 ---
 name: grepai-doctor
-description: "Single entry point for the whole grepai stack: install, initialize, self-heal, and benchmark semantic code search in any repo. The trigger is BROKEN OR MISSING GREPAI — never silently fall back to plain grep. Use when: grepai search errors ('failed to load index', 'unexpected EOF'); search returns empty results in a repo that should be indexed; 'Watcher: not running'; grepai or ollama is not installed; setting up grepai in a fresh repo end-to-end; or deciding whether grep or grepai fits a task in this repo (bench mode measures both). Also use proactively the moment grepai misbehaves, before reaching for the Grep tool."
+description: "Single entry point for the whole grepai stack: install, initialize, self-heal, and benchmark semantic code search in any repo. The trigger is BROKEN OR MISSING GREPAI — never switch search tools silently. Use when: grepai search errors ('failed to load index', 'unexpected EOF'); search returns empty results in a repo that should be indexed; 'Watcher: not running'; grepai or ollama is not installed; setting up grepai in a fresh repo end-to-end; or deciding whether grep or grepai fits a task in this repo (bench mode measures both). Also use proactively the moment grepai misbehaves — heal it or switch to grep explicitly, never silently."
 metadata:
   version: 1.0.0
 ---
 
 # grepai doctor — install, heal, benchmark
 
-grepai's worst failure mode is not the error itself — it's what agents do about it. When `grepai search` breaks (corrupted `index.gob` after a crash, dead watcher, missing model), the default agent behavior is a **silent fallback to plain grep**: semantic search and its ~96% token savings quietly disappear, and nobody notices for weeks. Healing takes one script call; this skill makes healing cheaper than falling back.
+grepai's worst failure mode is not the error itself — it's the **silent tool switch**. When `grepai search` breaks (corrupted `index.gob` after a crash, dead watcher, missing model), agents quietly degrade to ad-hoc grep without telling anyone, and the repo's chosen search setup stays broken for weeks. Silence is bad in both directions: silently abandoning a broken tool, and silently over-trusting a working one (grepai's top-10 is a ranking that can miss files — see the bench section). This skill makes the state visible and the fix one call: heal grepai when it's broken, and choose grep vs grepai per task on measured numbers.
 
 Everything runs through one idempotent script, `doctor.sh`, located **next to this SKILL.md**. No daemons, no launchd, no root. Run it from the target repo's root.
 
 Three non-negotiable rules:
 
-1. **Never fall back to grep silently.** If grepai errors, run the matching doctor mode first; use Grep only while a reindex is in flight, and come back.
+1. **Never switch search tools silently.** If grepai errors, run the matching doctor mode and say so. Choosing Grep deliberately (exact identifiers, syntax anchors, recall-critical checks — see the bench section) is a valid measured decision, not a fallback to hide.
 2. **Trust `grepai watch --status`, never exit codes.** `watch --background` exits 1 with "timeout waiting for process to become ready after 30s" while the daemon is actually fine (large initial scans outlive the readiness window). And match the status line anchored — `^Status: running` — because a bare "running" grep also matches `Status: not running`.
 3. **A bench verdict belongs in memory.** `.grepai/` is gitignored; measurements die with it. After `bench`, persist the numbers and the grep-vs-grepai rule to your agent memory.
 
@@ -35,7 +35,7 @@ bash <dir-of-this-SKILL.md>/doctor.sh [ensure|force|init|install|bench]
 - `force` — stops the watcher (verifies it actually stopped — never wipes under a live one), deletes the vector index, full reindex.
 - `init` — end-to-end for a new repo: install stack → `grepai init --yes` → watcher.
 - `install` — grepai (brew tap or official install.sh) + ollama + `nomic-embed-text`; fails loudly on any missing piece.
-- `bench` — times `git grep` vs `grepai search` on this repo (exact-symbol probe + natural-language queries), writes `.grepai/bench.md`, appends `grepai stats`.
+- `bench` — measures `git grep` vs `grepai search` on this repo (exact-symbol probe + keyword-decomposed intent queries): hit counts, line/file volumes, timings. It measures **volume and speed, not per-query relevance** — grepai's top-10 can still miss files keyword grep finds (see 'bench → agent memory'). Writes `.grepai/bench.md`, appends `grepai stats`.
 
 ## Verify after any healing mode
 
