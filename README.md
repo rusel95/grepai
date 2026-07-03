@@ -61,7 +61,7 @@ ollama pull nomic-embed-text
 ```bash
 npx skills add yoanbernabeu/grepai --skill grepai-doctor
 ```
-Teaches your coding agent (Claude Code, Cursor, Codex, …) to install, heal, and benchmark grepai on its own instead of silently falling back to plain grep — see [grepai-doctor](.claude/skills/grepai-doctor/README.md).
+Teaches your coding agent (Claude Code, Cursor, Codex, …) to install, heal, and benchmark grepai on its own — and to switch between grep and grepai deliberately, never silently. See [grepai-doctor](.claude/skills/grepai-doctor/README.md). (Until [PR #271](https://github.com/yoanbernabeu/grepai/pull/271) merges, install from the fork: `npx skills add rusel95/grepai --skill grepai-doctor`.)
 
 ## Quick Start
 
